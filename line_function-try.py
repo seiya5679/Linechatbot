@@ -5,6 +5,7 @@ import google.generativeai as genai  # Google Gemini API
 import pickle              # Pythonオブジェクトをバイナリ化して保存
 from linebot import LineBotApi, WebhookHandler  # LINE Messaging API用
 from linebot.models import MessageEvent, TextMessage, TextSendMessage, ImageMessage
+from linebot.models import TemplateSendMessage, ButtonsTemplate, MessageAction
 
 # -------------------------------
 # LINE Bot API の設定
@@ -66,30 +67,20 @@ def getItemFromDynamoDB(userID):
 # -------------------------------
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text_message(event: MessageEvent):
-    userID = event.source.user_id              # メッセージ送信者のユーザーID取得
-    item = getItemFromDynamoDB(userID)        # 過去の履歴取得
-    message = None
-
-    if item is None:
-        # 初回ユーザーの場合
-        message = "はじめまして！\n画像を投稿すると有名人を検出することができます！"
-        chat = gemini_model.start_chat(history=[])  # 新規チャットセッション開始
-        print('debug:', type(chat))                 # デバッグ用: chatオブジェクトの型確認
-        putItemToDynamoDB(userID, 0, pickle.dumps(chat.history))  # チャット履歴を保存
-    else:
-        # 過去にやり取りがあるユーザーの場合
-        prompt = event.message.text
-        history = pickle.loads(item['chat'].value)  # 保存された履歴を復元
-        chat = gemini_model.start_chat(history=history)
-        response = chat.send_message(prompt)         # Geminiにメッセージ送信
-        message = response.text.rstrip('\n')         # 改行削除
-        putItemToDynamoDB(userID, 0, pickle.dumps(chat.history))  # 更新履歴保存
-
-    # LINEに返信
-    line_bot_api.reply_message(
-        event.reply_token,
-        TextSendMessage(text=message)
+    message = TemplateSendMessage(
+        alt_text='ボタンテンプレート',
+        template=ButtonsTemplate(
+            title='カテゴリ選択',
+            text='どのカテゴリを見たいですか？',
+            actions=[
+                MessageAction(label='ファッション', text='ファッション'),
+                MessageAction(label='スポーツ', text='スポーツ'),
+                MessageAction(label='音楽', text='音楽'),
+                MessageAction(label='映画', text='映画'),
+            ]
+        )
     )
+    line_bot_api.reply_message(event.reply_token, message)
 
 # -------------------------------
 # 画像メッセージ受信時の処理
