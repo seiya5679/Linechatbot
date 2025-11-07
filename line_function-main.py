@@ -1,87 +1,177 @@
+# ================================
+# 必要なライブラリのインポート
+# ================================
 import os
 import boto3
-import json
+import google.generativeai as genai
+import pickle
 import tempfile
-import requests
+import json
 from linebot import LineBotApi, WebhookHandler
 from linebot.models import (
-    MessageEvent, TextMessage, ImageMessage,
-    TextSendMessage
+    MessageEvent, TextMessage, ImageMessage, TextSendMessage,
+    TemplateSendMessage, ButtonsTemplate, MessageAction
 )
-import google.generativeai as genai
 
-# ====== 環境変数から設定 ======
-line_bot_api = LineBotApi(os.environ.get("CHANNEL_ACCESS_TOKEN"))
-handler = WebhookHandler(os.environ.get("CHANNEL_SECRET"))
-genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
+# ================================
+# LINE Bot API設定
+# ================================
+line_bot_api = LineBotApi(os.environ.get('CHANNEL_ACCESS_TOKEN'))
+handler = WebhookHandler(os.environ.get('CHANNEL_SECRET'))
 
-# ====== Geminiモデルの初期化 ======
-gemini_text = genai.GenerativeModel("gemini-2.0-flash")
-gemini_vision = genai.GenerativeModel("gemini-2.0-flash")
+# ================================
+# Google Gemini API設定
+# ================================
+genai.configure(api_key=os.environ.get('GOOGLE_API_KEY'))
 
-# ====== Lambdaのメイン処理 ======
-def lambda_handler(event, context):
-    body = json.loads(event["body"])
-    signature = event["headers"]["x-line-signature"]
+# 画像解析用（Vision）とテキスト生成用（会話）
+gemini_text = genai.GenerativeModel("gemini-2.0.-flash")   # 軽量高速モデル
+gemini_vision = genai.GenerativeModel("gemini-2.0-flash") # 画像入力対応
 
+# ================================
+# AWS SDK設定
+# ================================
+rekognition = boto3.client('rekognition')
+dynamodb = boto3.resource('dynamodb')
+table = dynamodb.Table('linebot')
+
+# ================================
+# DynamoDB関連関数
+# ================================
+def putItemToDynamoDB(id, val, chat):
+    table.put_item(
+        Item={
+            "id": id,
+            "val": val,
+            "chat": chat,
+        }
+    )
+
+def getItemFromDynamoDB(userID):
     try:
-        handler.handle(body["events"][0], signature)
-    except Exception as e:
-        print("Error:", e)
+        response = table.get_item(Key={'id': userID})
+        item = response.get('Item', None)
+    except Exception:
+        item = None
+    return item
 
-    return {"statusCode": 200, "body": "OK"}
 
-
-# ====== テキストメッセージ処理 ======
+# ================================
+# テキストメッセージ処理
+# ================================
 @handler.add(MessageEvent, message=TextMessage)
-def handle_text_message(event):
-    user_text = event.message.text
+def handle_text_message(event: MessageEvent):
+    user_text = event.message.text.strip()
+    user_id = event.source.user_id
 
+    # --- 選択メニュー表示 ---
+    if user_text.lower() in ["メニュー", "menu", "スタート", "start"]:
+        message = TemplateSendMessage(
+            alt_text='コーデ選択メニュー',
+            template=ButtonsTemplate(
+                title='AIコーデメニュー',
+                text='どの方法でコーデを作りますか？',
+                actions=[
+                    MessageAction(label='👕 服の写真からコーデを作成', text='写真からコーデを作成'),
+                    MessageAction(label='📝 テキストからコーデを生成', text='テキストからコーデを生成')
+                ]
+            )
+        )
+        line_bot_api.reply_message(event.reply_token, message)
+        return
+
+    # --- 写真モードの案内 ---
     if "写真から" in user_text:
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text="📸 服の写真を送ってください！その服に合うコーデを提案します。")
+            TextSendMessage(text="📸 服の写真を送ってください！AIがコーデを提案します。")
         )
         return
 
-    elif "テキストから" in user_text:
+    # --- テキストモード処理 ---
+    if "テキストから" in user_text:
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text="📝 どんなコーデを考えていますか？（例：デート・通学・お出かけなど）")
+            TextSendMessage(text="📝 どんなシーンのコーデを考えていますか？（例：デート・通学・オフィスなど）")
         )
         return
 
-    else:
-        # Gemini Text呼び出し
-        prompt = f"ユーザーの要望『{user_text}』に合うファッションコーデを自然な会話形式で提案してください。"
-        response = gemini_text.generate_content(prompt)
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=response.text.strip())
-        )
+    # --- 通常のテキスト入力をコーデ生成として扱う ---
+    prompt = f"次の要望に合うコーディネートを日本語で提案してください。自然な会話形式で。\n要望: {user_text}"
+    response = gemini_text.generate_content(prompt)
+
+    reply_text = response.text.strip() if response and response.text else "すみません、うまく提案できませんでした。"
+
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(text=reply_text)
+    )
 
 
-# ====== 画像メッセージ処理 ======
+# ================================
+# 画像メッセージ処理
+# ================================
 @handler.add(MessageEvent, message=ImageMessage)
-def handle_image_message(event):
-    # 画像を一時保存
+def handle_image_message(event: MessageEvent):
+    user_id = event.source.user_id
+    item = getItemFromDynamoDB(user_id)
+
+    # 初回ユーザー登録
+    if item is None:
+        chat = gemini_text.start_chat(history=[])
+        putItemToDynamoDB(user_id, 0, pickle.dumps(chat.history))
+        item = getItemFromDynamoDB(user_id)
+
+    # 投稿回数更新
+    count = item["val"] + 1
+    putItemToDynamoDB(user_id, count, item["chat"])
+
+    # 一時ファイルとして画像を保存
     message_id = event.message.id
     message_content = line_bot_api.get_message_content(message_id)
-
     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
         for chunk in message_content.iter_content():
             tmp.write(chunk)
         tmp_path = tmp.name
 
-    # Gemini Visionで解析
-    with open(tmp_path, "rb") as img_file:
-        response = gemini_vision.generate_content([
-            "この服に合うコーデを提案してください。",
-            {"mime_type": "image/jpeg", "data": img_file.read()}
-        ])
+    # Rekognitionで基本解析（オプション：人物や服が写っているか）
+    with open(tmp_path, "rb") as img:
+        binary_data = img.read()
+        labels = rekognition.detect_labels(Image={"Bytes": binary_data})
+    label_names = [label["Name"] for label in labels["Labels"]]
+    print("Rekognition labels:", label_names)
 
-    # 結果を返信
+    # Gemini Visionでコーデ提案
+    with open(tmp_path, "rb") as img_file:
+        image_data = img_file.read()
+
+    vision_prompt = (
+        "この写真の服の特徴を分析し、似合うファッションコーデを日本語で提案してください。"
+        "季節・色合い・シーンを考慮して自然な口調で説明してください。"
+    )
+    response = gemini_vision.generate_content([
+        vision_prompt,
+        {"mime_type": "image/jpeg", "data": image_data}
+    ])
+
+    ai_text = response.text.strip() if response and response.text else "すみません、画像からコーデを提案できませんでした。"
+
+    # LINEに返信
+    reply_text = f"{count}回目の画像投稿ですね👕\n{ai_text}"
     line_bot_api.reply_message(
         event.reply_token,
-        TextSendMessage(text=response.text.strip())
+        TextSendMessage(text=reply_text)
     )
+
+
+# ================================
+# Lambdaエントリポイント
+# ================================
+def lambda_handler(event, context):
+    try:
+        body = json.loads(event["body"])
+        signature = event["headers"]["x-line-signature"]
+        handler.handle(body["events"][0], signature)
+    except Exception as e:
+        print("Error:", e)
+    return {"statusCode": 200, "body": "OK"}
