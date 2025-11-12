@@ -66,21 +66,16 @@ def getItemFromDynamoDB(userID):
 # テキストメッセージ受信時の処理
 # -------------------------------
 @handler.add(MessageEvent, message=TextMessage)
-def handle_text_message(event: MessageEvent):
-    message = TemplateSendMessage(
-        alt_text='ボタンテンプレート',
-        template=ButtonsTemplate(
-            title='カテゴリ選択',
-            text='どのカテゴリを見たいですか？',
-            actions=[
-                MessageAction(label='ファッション', text='ファッション'),
-                MessageAction(label='スポーツ', text='スポーツ'),
-                MessageAction(label='音楽', text='音楽'),
-                MessageAction(label='映画', text='映画'),
-            ]
-        )
-    )
-    line_bot_api.reply_message(event.reply_token, message)
+def handle_message(event):
+    user_message = event.message.text  # ← リッチメニューで設定した文字列
+    user_id = event.source.user_id
+
+    if user_message == "画像から生成":
+        reply = TextSendMessage(text="画像を送信してください！")
+    elif user_message == "テキストから生成":
+        reply = TextSendMessage(text="どんな画像を生成しますか？")
+
+    line_bot_api.reply_message(event.reply_token, reply)
 
 # -------------------------------
 # 画像メッセージ受信時の処理
