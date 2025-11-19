@@ -57,9 +57,11 @@ def putItemToDynamoDB(id, val, chat):
 def getItemFromDynamoDB(userID):
     try:
         response = table.get_item(Key={'id': userID})
-        return response.get('Item')
-    except:
+        return response.get('Item', None)
+    except Exception as e:
+        print("DynamoDB get_item error:", e)
         return None
+
 
 
 # -------------------------------
