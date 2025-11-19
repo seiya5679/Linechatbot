@@ -74,23 +74,20 @@ def handle_message(event):
         reply = TextSendMessage(text="画像を送信してください！")
         line_bot_api.reply_message(event.reply_token, reply)
     elif user_message == "テキストから生成":
-        reply = TextSendMessage(text="テキストを入力して"),
+        flex_message = {
+            "type": "bubble",
+            "body": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+            {"type": "text", "text": "最初のメッセージ"},
+            {"type": "text", "text": "二つ目のメッセージ"}
+            ]
+            }
+        }
+
+        reply = FlexSendMessage(alt_text="まとめメッセージ", contents=flex_message)
         line_bot_api.reply_message(event.reply_token, reply)
-        message = TemplateSendMessage(
-            alt_text='ボタンテンプレート',
-            template=ButtonsTemplate(
-                title='カテゴリ選択',
-                text='どんな画像を生成しますか？',
-                actions=[
-                    MessageAction(label='ファッション', text='ファッション'),
-                    MessageAction(label='スポーツ', text='スポーツ'),
-                    MessageAction(label='音楽', text='音楽'),
-                    MessageAction(label='映画', text='映画'),
-                ]
-                )
-            )
-        line_bot_api.push_message(user_id, message)
-        
     else:
         reply = TextSendMessage(text="メニューから選択してください！")
         line_bot_api.reply_message(event.reply_token, reply)
