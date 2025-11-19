@@ -5,7 +5,7 @@ import google.generativeai as genai  # Google Gemini API
 import pickle              # Pythonオブジェクトをバイナリ化して保存
 from linebot import LineBotApi, WebhookHandler  # LINE Messaging API用
 from linebot.models import MessageEvent, TextMessage, TextSendMessage, ImageMessage
-from linebot.models import TemplateSendMessage, ButtonsTemplate, MessageAction, FlexSendMessage
+from linebot.models import TemplateSendMessage, ButtonsTemplate, FlexSendMessage, BubbleContainer, BoxComponent, TextComponent, ButtonComponent, MessageAction
 
 # -------------------------------
 # LINE Bot API の設定
@@ -74,20 +74,36 @@ def handle_message(event):
         reply = TextSendMessage(text="画像を送信してください！")
         line_bot_api.reply_message(event.reply_token, reply)
     elif user_message == "テキストから生成":
-        flex_message = {
-            "type": "bubble",
-            "body": {
-            "type": "box",
-            "layout": "vertical",
-            "contents": [
-            {"type": "text", "text": "最初のメッセージ"},
-            {"type": "text", "text": "二つ目のメッセージ"}
+        # Bubble の作成
+        bubble = BubbleContainer(
+            body=BoxComponent(
+            layout='vertical',
+            contents=[
+                TextComponent(text='どんな画像を生成しますか？'),
+                    ButtonComponent(
+                    action=MessageAction(label='ファッション', text='ファッション')
+                ),
+                ButtonComponent(
+                    action=MessageAction(label='スポーツ', text='スポーツ')
+                ),
+                ButtonComponent(
+                    action=MessageAction(label='音楽', text='音楽')
+                ),
+                ButtonComponent(
+                    action=MessageAction(label='映画', text='映画')
+                ),
             ]
-            }
-        }
+            )
+        )
 
-        reply = FlexSendMessage(alt_text="まとめメッセージ", contents=flex_message)
-        line_bot_api.reply_message(event.reply_token, reply)
+# FlexSendMessage を作成
+        flex_message = FlexSendMessage(
+            alt_text='カテゴリ選択',
+            contents=bubble
+        )
+
+# 返信
+        line_bot_api.reply_message(event.reply_token, flex_message)
     else:
         reply = TextSendMessage(text="メニューから選択してください！")
         line_bot_api.reply_message(event.reply_token, reply)
