@@ -5,7 +5,7 @@ import google.generativeai as genai  # Google Gemini API
 import pickle              # Pythonオブジェクトをバイナリ化して保存
 from linebot import LineBotApi, WebhookHandler  # LINE Messaging API用
 from linebot.models import MessageEvent, TextMessage, TextSendMessage, ImageMessage
-from linebot.models import TemplateSendMessage, ButtonsTemplate, MessageAction
+from linebot.models import TemplateSendMessage, ButtonsTemplate, MessageAction, FlexSendMessage
 
 # -------------------------------
 # LINE Bot API の設定
