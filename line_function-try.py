@@ -5,7 +5,7 @@ import google.generativeai as genai  # Google Gemini API
 import pickle              # Pythonオブジェクトをバイナリ化して保存
 from linebot import LineBotApi, WebhookHandler  # LINE Messaging API用
 from linebot.models import MessageEvent, TextMessage, TextSendMessage, ImageMessage
-from linebot.models import TemplateSendMessage, ButtonsTemplate, FlexSendMessage, BubbleContainer, BoxComponent, TextComponent, ButtonComponent, MessageAction, QuickReply, QuickReplyButton
+from linebot.models import TemplateSendMessage, ButtonsTemplate, FlexSendMessage, BubbleContainer, BoxComponent, TextComponent, ButtonComponent, MessageAction, QuickReply, QuickReplyButton, LocationMessage, LocationAction
 from linebot.models import (
     BubbleContainer, BoxComponent, TextComponent, ImageComponent,
     ButtonComponent,CarouselContainer, FlexSendMessage, MessageAction
@@ -79,23 +79,45 @@ def handle_message(event):
     elif user_message == "テキストから生成":
         # クイックリプライボタンの作成
         quick_reply_buttons = QuickReply(
-        items=[
-        QuickReplyButton(action=MessageAction(label="ファッション", text="ファッション")),
-        QuickReplyButton(action=MessageAction(label="スポーツ", text="スポーツ")),
-        QuickReplyButton(action=MessageAction(label="音楽", text="音楽")),
-        QuickReplyButton(action=MessageAction(label="映画", text="映画")),
-    ]
-)
-# TextSendMessageにクイックリプライを付与
+            items=[
+                QuickReplyButton(action=MessageAction(label="ファッション", text="ファッション")),
+                QuickReplyButton(action=MessageAction(label="スポーツ", text="スポーツ")),
+                QuickReplyButton(action=MessageAction(label="音楽", text="音楽")),
+                QuickReplyButton(action=MessageAction(label="映画", text="映画")),
+        ]
+        )
+        # TextSendMessageにクイックリプライを付与
         message = TextSendMessage(
             text="カテゴリを選択してください",
             quick_reply=quick_reply_buttons
-)
-# 送信例
+        )
+        # 送信
         line_bot_api.reply_message(event.reply_token, message)
     else:
-        reply = TextSendMessage(text="メニューから選択してください！")
-        line_bot_api.reply_message(event.reply_token, reply)
+        message = TextSendMessage(
+            text="現在地を送ってください",
+            quick_reply=QuickReply(
+                items=[
+                QuickReplyButton(action=LocationAction(label="位置情報を送信"))
+                ]
+            )
+        )
+        line_bot_api.reply_message(event.reply_token, message)
+    
+# -------------------------------
+# 位置メッセージ受信時の処理
+# -------------------------------
+@handler.add(MessageEvent, message=LocationMessage)
+def handle_location(event):
+    latitude = event.message.latitude
+    longitude = event.message.longitude
+    address = event.message.address
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(text=f"位置情報を受け取りました！\n住所: {address}")
+    )
+
+
 # -------------------------------
 # 画像メッセージ受信時の処理
 # -------------------------------
