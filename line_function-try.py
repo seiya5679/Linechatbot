@@ -3,6 +3,8 @@ import os                  # 環境変数を扱うため
 import boto3               # AWS SDK (Rekognition, DynamoDB)
 import google.generativeai as genai  # Google Gemini API
 import pickle              # Pythonオブジェクトをバイナリ化して保存
+import io
+from PIL import Image      # 画像処理用
 from linebot import LineBotApi, WebhookHandler  # LINE Messaging API用
 from linebot.models import MessageEvent, TextMessage, TextSendMessage, ImageMessage
 from linebot.models import TemplateSendMessage, ButtonsTemplate, FlexSendMessage, BubbleContainer, BoxComponent, TextComponent, ButtonComponent, MessageAction
@@ -112,56 +114,50 @@ def handle_message(event):
 # -------------------------------
 @handler.add(MessageEvent, message=ImageMessage)
 def handle_image_message(event: MessageEvent):
-    userID = event.source.user_id
-    item = getItemFromDynamoDB(userID)
+    user_id = event.source.user_id
+    item = getItemFromDynamoDB(user_id)
+ 
+    weather_info = "晴れ、気温25度"  #デフォルトの天気情報
+    user_style = "指定なし"
 
-    # 初回ユーザーの場合の処理
-    if item is None:
-        chat = gemini_model.start_chat(history=[])
-        putItemToDynamoDB(userID, 0, pickle.dumps(chat.history))
-        item = getItemFromDynamoDB(userID)
+    if item:
+        if 'weather' in item:
+            weather_info = item['weather']
+        if 'style' in item:
+            user_style = item['style']
+    
+    message_id = event.massage.id
+    message_content = line_bot_api.get_massage_content(message_id)
+    image_binary = message_content.content
 
-    # 画像送信回数を更新
-    putItemToDynamoDB(userID, item['val']+1, item['chat'])
-    retrun_message = str(item['val']+1) + "回目の画像投稿です。\n"
+    img = Image.open(io.BytesIO(image_binary))
 
-    # 画像データ取得
-    message_id = event.message.id
-    message_content = line_bot_api.get_message_content(message_id)
-    message_binary = message_content.content  # バイナリデータとして取得
+    prompt = f"""
+    あなたはプロのファッションスタイリストです。
+    ユーザーから送られた写真の服をメインに使って、以下の条件に合うおしゃれなコーデを複数パターン提案してください。
 
-    # Rekognitionでラベル検出
-    detect = rekognition.detect_labels(
-        Image={
-            "Bytes": message_binary
-        }
-    )
-    labels = detect['Labels']
-    names = [label.get('Name') for label in labels]
+    【条件】
+    ・今日の天気: {weather_info}
+    ・ユーザーの好み: {user_style}
+    ・出力形式:タイトルと具体的なアイテムの組み合わせ、着こなしのポイントを簡潔に。
 
-    # 人物が含まれるか確認
-    if "Human" in names or "Person" in names:
-        response = rekognition.recognize_celebrities(
-            Image={
-                "Bytes": message_binary
-            }
-        )
-        if len(response['CelebrityFaces']) > 0:
-            # 有名人を検出できた場合
-            for celeb in response['CelebrityFaces']:
-                retrun_message += celeb['Name'] + '\n'
-            retrun_message = retrun_message.rstrip('\n')
-        else:
-            retrun_message += "有名人を特定できませんでした！"
-    else:
-        retrun_message += "人物を検出できませんでした！"
+    提案の最後には、「このコーデに合うアイテムを探す」と一言添えてください。
+    """
 
+    try:
+        response = gemini_model.generate_content([prompt, img])
+        return_message = response.text
+
+    except Exception as e:
+        print(f"Gemini Error: {e}")
+        return_message = "申し訳ありません。コーデの生成に失敗しました。"
+ 
     # LINEに返信
     line_bot_api.reply_message(
         event.reply_token,
-        TextSendMessage(text=retrun_message)
+        TextSendMessage(text=return_message)
     )
-
+ 
 # -------------------------------
 # Lambda関数のエントリポイント
 # -------------------------------

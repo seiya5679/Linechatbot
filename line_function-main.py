@@ -6,6 +6,8 @@ import boto3
 import google.generativeai as genai
 import pickle
 import tempfile
+import io
+from PIL import Image
 import json
 from linebot import LineBotApi, WebhookHandler
 from linebot.models import (
@@ -115,54 +117,48 @@ def handle_text_message(event: MessageEvent):
 def handle_image_message(event: MessageEvent):
     user_id = event.source.user_id
     item = getItemFromDynamoDB(user_id)
+ 
+    weather_info = "晴れ、気温25度"  #デフォルトの天気情報
+    user_style = "指定なし"
 
-    # 初回ユーザー登録
-    if item is None:
-        chat = gemini_text.start_chat(history=[])
-        putItemToDynamoDB(user_id, 0, pickle.dumps(chat.history))
-        item = getItemFromDynamoDB(user_id)
+    if item:
+        if 'weather' in item:
+            weather_info = item['weather']
+        if 'style' in item:
+            user_style = item['style']
+    
+    message_id = event.massage.id
+    message_content = line_bot_api.get_massage_content(message_id)
+    image_binary = message_content.content
 
-    # 投稿回数更新
-    count = item["val"] + 1
-    putItemToDynamoDB(user_id, count, item["chat"])
+    img = Image.open(io.BytesIO(image_binary))
 
-    # 一時ファイルとして画像を保存
-    message_id = event.message.id
-    message_content = line_bot_api.get_message_content(message_id)
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-        for chunk in message_content.iter_content():
-            tmp.write(chunk)
-        tmp_path = tmp.name
+    prompt = f"""
+    あなたはプロのファッションスタイリストです。
+    ユーザーから送られた写真の服をメインに使って、以下の条件に合うおしゃれなコーデを複数パターン提案してください。
 
-    # Rekognitionで基本解析（オプション：人物や服が写っているか）
-    with open(tmp_path, "rb") as img:
-        binary_data = img.read()
-        labels = rekognition.detect_labels(Image={"Bytes": binary_data})
-    label_names = [label["Name"] for label in labels["Labels"]]
-    print("Rekognition labels:", label_names)
+    【条件】
+    ・今日の天気: {weather_info}
+    ・ユーザーの好み: {user_style}
+    ・出力形式:タイトルと具体的なアイテムの組み合わせ、着こなしのポイントを簡潔に。
 
-    # Gemini Visionでコーデ提案
-    with open(tmp_path, "rb") as img_file:
-        image_data = img_file.read()
+    提案の最後には、「このコーデに合うアイテムを探す」と一言添えてください。
+    """
 
-    vision_prompt = (
-        "この写真の服の特徴を分析し、似合うファッションコーデを日本語で提案してください。"
-        "季節・色合い・シーンを考慮して自然な口調で説明してください。"
-    )
-    response = gemini_vision.generate_content([
-        vision_prompt,
-        {"mime_type": "image/jpeg", "data": image_data}
-    ])
+    try:
+        response = gemini_model.generate_content([prompt, img])
+        return_message = response.text
 
-    ai_text = response.text.strip() if response and response.text else "すみません、画像からコーデを提案できませんでした。"
-
+    except Exception as e:
+        print(f"Gemini Error: {e}")
+        return_message = "申し訳ありません。コーデの生成に失敗しました。"
+ 
     # LINEに返信
-    reply_text = f"{count}回目の画像投稿ですね👕\n{ai_text}"
     line_bot_api.reply_message(
         event.reply_token,
-        TextSendMessage(text=reply_text)
+        TextSendMessage(text=retrun_message)
     )
-
+ 
 
 # ================================
 # Lambdaエントリポイント
