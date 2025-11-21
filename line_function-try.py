@@ -5,7 +5,7 @@ import google.generativeai as genai  # Google Gemini API
 import pickle              # Pythonオブジェクトをバイナリ化して保存
 from linebot import LineBotApi, WebhookHandler  # LINE Messaging API用
 from linebot.models import MessageEvent, TextMessage, TextSendMessage, ImageMessage
-from linebot.models import TemplateSendMessage, ButtonsTemplate, FlexSendMessage, BubbleContainer, BoxComponent, TextComponent, ButtonComponent, MessageAction
+from linebot.models import TemplateSendMessage, ButtonsTemplate, FlexSendMessage, BubbleContainer, BoxComponent, TextComponent, ButtonComponent, MessageAction, QuickReply, QuickReplyButton
 from linebot.models import (
     BubbleContainer, BoxComponent, TextComponent, ImageComponent,
     ButtonComponent,CarouselContainer, FlexSendMessage, MessageAction
@@ -77,82 +77,22 @@ def handle_message(event):
         reply = TextSendMessage(text="画像を送信してください！")
         line_bot_api.reply_message(event.reply_token, reply)
     elif user_message == "テキストから生成":
-        # Bubble の作成
-        carousel = CarouselContainer(
-        contents=[
-        BubbleContainer(
-            size="micro",  # コンパクトに
-            body=BoxComponent(
-                layout="vertical",
-                paddingAll="10px",
-                backgroundColor="#00000000",  # 透明風
-                contents=[
-                    ButtonComponent(
-                        action=MessageAction(label="ファッション", text="ファッション"),
-                        style="secondary",
-                        height="sm"
-                    )
-                ]
-            )
-        ),
-        BubbleContainer(
-            size="micro",
-            body=BoxComponent(
-                layout="vertical",
-                paddingAll="10px",
-                backgroundColor="#00000000",
-                contents=[
-                    ButtonComponent(
-                        action=MessageAction(label="スポーツ", text="スポーツ"),
-                        style="secondary",
-                        height="sm"
-                    )
-                ]
-            )
-        ),
-        BubbleContainer(
-            size="micro",
-            body=BoxComponent(
-                layout="vertical",
-                paddingAll="10px",
-                backgroundColor="#00000000",
-                contents=[
-                    ButtonComponent(
-                        action=MessageAction(label="音楽", text="音楽"),
-                        style="secondary",
-                        height="sm"
-                    )
-                ]
-            )
-        ),
-        BubbleContainer(
-            size="micro",
-            body=BoxComponent(
-                layout="vertical",
-                paddingAll="10px",
-                backgroundColor="#00000000",
-                contents=[
-                    ButtonComponent(
-                        action=MessageAction(label="映画", text="映画"),
-                        style="secondary",
-                        height="sm"
-                    )
-                ]
-            )
-        ),
+        # クイックリプライボタンの作成
+        quick_reply_buttons = QuickReply(
+        items=[
+        QuickReplyButton(action=MessageAction(label="ファッション", text="ファッション")),
+        QuickReplyButton(action=MessageAction(label="スポーツ", text="スポーツ")),
+        QuickReplyButton(action=MessageAction(label="音楽", text="音楽")),
+        QuickReplyButton(action=MessageAction(label="映画", text="映画")),
     ]
 )
-
-# FlexSendMessage を作成
-        flex_buttons = FlexSendMessage(
-            alt_text='選択肢',
-            contents=carousel
-        )
-
-# 返信
-        text_msg = TextSendMessage(text="どんな画像を生成しますか？")
-        buttons_msg = flex_buttons
-        line_bot_api.reply_message(event.reply_token, [text_msg, buttons_msg])
+# TextSendMessageにクイックリプライを付与
+        message = TextSendMessage(
+            text="カテゴリを選択してください",
+            quick_reply=quick_reply_buttons
+)
+# 送信例
+        line_bot_api.reply_message(event.reply_token, message)
     else:
         reply = TextSendMessage(text="メニューから選択してください！")
         line_bot_api.reply_message(event.reply_token, reply)
