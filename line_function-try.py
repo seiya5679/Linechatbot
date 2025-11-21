@@ -126,8 +126,8 @@ def handle_image_message(event: MessageEvent):
         if 'style' in item:
             user_style = item['style']
     
-    message_id = event.massage.id
-    message_content = line_bot_api.get_massage_content(message_id)
+    message_id = event.message.id
+    message_content = line_bot_api.get_message_content(message_id)
     image_binary = message_content.content
 
     img = Image.open(io.BytesIO(image_binary))
