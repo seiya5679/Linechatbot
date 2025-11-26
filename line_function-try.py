@@ -73,18 +73,17 @@ def getItemFromDynamoDB(userID):
 def handle_message(event):
     user_message = event.message.text
     user_id = event.source.user_id
-
     # === ① DynamoDBからユーザーステートを取得 ===
     item = getItemFromDynamoDB(user_id)
-
+    message = None
     # === ② 初回ユーザーの場合の処理 ===
     if item is None:
         chat = gemini_model.start_chat(history=[])
         putItemToDynamoDB(
             id=user_id,
-            state="INIT",                   # 初回状態
-            chat=pickle.dumps(chat.history),
-            val=0
+            state="INIT",                 # 初回状態
+            val=0,
+            chat=pickle.dumps(chat.history)
         )
         item = getItemFromDynamoDB(user_id)
 
@@ -107,24 +106,23 @@ def handle_message(event):
                 chat=item["chat"],
                 val=item["val"]
             )
-            reply = TextSendMessage(text="画像を送信してください！")
+            reply = TextSendMessage(text="持っている服の画像を送信してください！")
             line_bot_api.reply_message(event.reply_token, reply)
             return
 
         elif user_message == "テキストから生成":
             putItemToDynamoDB(
                 id=user_id,
-                state="ASK_CATEGORY",
+                state="ASK_AGE",
                 chat=item["chat"],
                 val=item["val"]
             )
-
             message = TextSendMessage(
-                text="カテゴリを選んでください",
+                text="どんなカテゴリでコーデを組みますか？",
                 quick_reply=QuickReply(
                     items=[
                         QuickReplyButton(action=MessageAction(label=label, text=label))
-                        for label in ["ファッション", "スポーツ", "音楽", "映画"]
+                        for label in ["カジュアル系", "綺麗系", "フォーマル", "スポーツ","ストリート","その他"]
                     ]
                 )
             )
@@ -132,54 +130,101 @@ def handle_message(event):
             return
 
         else:
-            # その他のメッセージ → 位置情報を要求
             putItemToDynamoDB(
                 id=user_id,
-                state="WAIT_LOCATION",
+                state="INIT",# 初期状態に戻す
                 chat=item["chat"],
                 val=item["val"]
             )
-
-            message = TextSendMessage(
-                text="現在地を送ってください",
+            message = TextSendMessage(text="画面下部のメニューから選択してください")
+            line_bot_api.reply_message(event.reply_token, message)
+            return
+    # ★ ASK_CATEGORY → ユーザーがカテゴリを選択した後の処理
+    elif state == "ASK_AGE":
+        putItemToDynamoDB(
+            id=user_id,
+            state="ASK_COLOR",
+            chat=item["chat"],
+            val=item["val"]
+        )
+        message = TextSendMessage(
+                text="年齢を選んでください",
                 quick_reply=QuickReply(
                     items=[
-                        QuickReplyButton(action=LocationAction(label="位置情報を送信"))
+                        QuickReplyButton(action=MessageAction(label=label, text=label))
+                        for label in ["10代", "20代", "30代", "40代","50代","60代以上"]
                     ]
                 )
             )
-            line_bot_api.reply_message(event.reply_token, message)
-            return
-
-    # ★ ASK_CATEGORY → ユーザーがカテゴリを選択した後の処理
-    elif state == "ASK_CATEGORY":
-        reply = TextSendMessage(text=f"カテゴリ「{user_message}」を選択しました！テキストを入力してください。")
+        line_bot_api.reply_message(event.reply_token, reply)
+        return
+    
+    elif state == "ASK_COLOR":
         putItemToDynamoDB(
             id=user_id,
-            state="WAIT_TEXT_INPUT",
+            state="ASK_PRICE",
             chat=item["chat"],
             val=item["val"]
         )
+        message = TextSendMessage(
+                text="どんな色でコーデを組みますか？",
+                quick_reply=QuickReply(
+                    items=[
+                        QuickReplyButton(action=MessageAction(label=label, text=label))
+                        for label in ["明るめな色", "暗めな色", "派手目の色", "落ち着いた色","モノトーン","その他"]
+                    ]
+                )
+            )
         line_bot_api.reply_message(event.reply_token, reply)
         return
-
-    # ★ WAIT_LOCATION → 位置情報以外が来たら再度催促
-    elif state == "WAIT_LOCATION":
-        reply = TextSendMessage(text="位置情報を送信してください。")
-        line_bot_api.reply_message(event.reply_token, reply)
-        return
-
-    # ★ WAIT_TEXT_INPUT → テキストを受けて生成すればOK
-    elif state == "WAIT_TEXT_INPUT":
-        reply = TextSendMessage(text=f"「{user_message}」で生成を開始します！")
+    elif state == "ASK_PRICE":
         putItemToDynamoDB(
             id=user_id,
-            state="INIT",      # 初期状態に戻す
+            state="ASK_LOCATION",
             chat=item["chat"],
             val=item["val"]
         )
+        message = TextSendMessage(
+                text="予算を選んでください",
+                quick_reply=QuickReply(
+                    items=[
+                        QuickReplyButton(action=MessageAction(label=label, text=label))
+                        for label in ["1000円以下", "1000円〜5000円", "5000円〜10000円", "10000円以上","特に気にしない"]
+                    ]
+                )
+            )
         line_bot_api.reply_message(event.reply_token, reply)
         return
+    elif state == "ASK_LOCATION":
+        putItemToDynamoDB(
+            id=user_id,
+            state="generate_COORDINATES",
+            chat=item["chat"],
+            val=item["val"]
+        )
+        message = TextSendMessage(
+            text="現在地を送ってください",
+            quick_reply=QuickReply(
+                items=[
+                QuickReplyButton(action=LocationAction(label="位置情報を送信"))
+                ]
+            )
+        )
+        line_bot_api.reply_message(event.reply_token, message)
+        return
+    elif state == "generate_COORDINATES":
+        putItemToDynamoDB(
+            id=user_id,
+            state="INIT",
+            chat=item["chat"],
+            val=item["val"]
+        )
+        # コーディネート生成処理をここに追加
+        message = TextSendMessage(text="あなたにぴったりのコーディネートを生成しました！")
+        line_bot_api.reply_message(event.reply_token, message)
+        return
+
+    
     
 # -------------------------------
 # 位置メッセージ受信時の処理
