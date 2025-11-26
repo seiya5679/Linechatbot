@@ -75,7 +75,6 @@ def handle_message(event):
     user_id = event.source.user_id
     # === ① DynamoDBからユーザーステートを取得 ===
     item = getItemFromDynamoDB(user_id)
-    message = None
     # === ② 初回ユーザーの場合の処理 ===
     if item is None:
         chat = gemini_model.start_chat(history=[])
@@ -85,14 +84,11 @@ def handle_message(event):
             val=0,
             chat=pickle.dumps(chat.history)
         )
-        item = getItemFromDynamoDB(user_id)
-
         # 初回挨拶
-        reply = TextSendMessage(text="こんにちは！まず使い方を選んでください。")
+        reply = TextSendMessage(text="こんにちは！このチャットボットでは当日のコーデ生成をテキスト形式、もしくは既に持っている服の写真から自動で生成します。画面下部のメニューから選択してください。")
         line_bot_api.reply_message(event.reply_token, reply)
         return
-
-    # 現在のステート
+    # 現在のステート取得
     state = item["state"]
 
     # === ③ ステートごとの分岐 ===
@@ -139,7 +135,6 @@ def handle_message(event):
             message = TextSendMessage(text="画面下部のメニューから選択してください")
             line_bot_api.reply_message(event.reply_token, message)
             return
-    # ★ ASK_CATEGORY → ユーザーがカテゴリを選択した後の処理
     elif state == "ASK_AGE":
         putItemToDynamoDB(
             id=user_id,
@@ -198,12 +193,12 @@ def handle_message(event):
     elif state == "ASK_LOCATION":
         putItemToDynamoDB(
             id=user_id,
-            state="generate_COORDINATES",
+            state="WAIT_LOCATION",
             chat=item["chat"],
             val=item["val"]
         )
         message = TextSendMessage(
-            text="現在地を送ってください",
+            text="どこで服を着ていくか現在地を送ってください",
             quick_reply=QuickReply(
                 items=[
                 QuickReplyButton(action=LocationAction(label="位置情報を送信"))
@@ -212,7 +207,7 @@ def handle_message(event):
         )
         line_bot_api.reply_message(event.reply_token, message)
         return
-    elif state == "generate_COORDINATES":
+    elif state == "WAIT_LOCATION":
         putItemToDynamoDB(
             id=user_id,
             state="INIT",
@@ -231,13 +226,21 @@ def handle_message(event):
 # -------------------------------
 @handler.add(MessageEvent, message=LocationMessage)
 def handle_location(event):
-    latitude = event.message.latitude # 緯度
-    longitude = event.message.longitude # 経度
+    user_id = event.source.user_id
+    item = getItemFromDynamoDB(user_id)
+    putItemToDynamoDB(
+            id=user_id,
+            state="INIT",
+            chat=item["chat"],
+            val=item["val"]
+        )
     address = event.message.address # 住所
     line_bot_api.reply_message(
         event.reply_token,
-        TextSendMessage(text=f"位置情報を受け取りました！\n住所: {address,}")
+        TextSendMessage(text=f"今までの会話とこの地域の天気や気温を考慮して画像を生成しました!")
     )
+
+
 
 
 # -------------------------------
