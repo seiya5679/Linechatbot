@@ -33,7 +33,7 @@ table = dynamodb.Table('linebot')         # DynamoDBのテーブル名
 # DynamoDB操作関数
 # -------------------------------
 
-def putItemToDynamoDB(id, val, chat):
+def putItemToDynamoDB(id,state, val, chat):
     """
     DynamoDBにデータを保存する関数
     - id: LINEユーザーID
@@ -43,6 +43,7 @@ def putItemToDynamoDB(id, val, chat):
     table.put_item(
         Item = {
             "id": id,
+            "state": state,
             "val" : val,
             "chat" : chat,
         }
@@ -70,35 +71,115 @@ def getItemFromDynamoDB(userID):
 # -------------------------------
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    user_message = event.message.text  # ← リッチメニューで設定した文字列
+    user_message = event.message.text
     user_id = event.source.user_id
 
-    if user_message == "画像から生成":
-        reply = TextSendMessage(text="画像を送信してください！")
+    # === ① DynamoDBからユーザーステートを取得 ===
+    item = getItemFromDynamoDB(user_id)
+
+    # === ② 初回ユーザーの場合の処理 ===
+    if item is None:
+        chat = gemini_model.start_chat(history=[])
+        putItemToDynamoDB(
+            id=user_id,
+            state="INIT",                   # 初回状態
+            chat=pickle.dumps(chat.history),
+            val=0
+        )
+        item = getItemFromDynamoDB(user_id)
+
+        # 初回挨拶
+        reply = TextSendMessage(text="こんにちは！まず使い方を選んでください。")
         line_bot_api.reply_message(event.reply_token, reply)
-    elif user_message == "テキストから生成":
-        # TextSendMessageにクイックリプライを付与
-        message = TextSendMessage(
-            text="カテゴリを選んでください",
-            quick_reply=QuickReply(
-                items=[
-                    QuickReplyButton(action=MessageAction(label=label, text=label))
-                    for label in ["ファッション", "スポーツ", "音楽", "映画"]
-                ]
+        return
+
+    # 現在のステート
+    state = item["state"]
+
+    # === ③ ステートごとの分岐 ===
+
+    # ★ INIT → リッチメニューやテキストでモード選択
+    if state == "INIT":
+        if user_message == "画像から生成":
+            putItemToDynamoDB(
+                id=user_id,
+                state="WAIT_IMAGE",           # 次は画像待ち状態
+                chat=item["chat"],
+                val=item["val"]
             )
-        )
-        # 送信
-        line_bot_api.reply_message(event.reply_token, message)
-    else:
-        message = TextSendMessage(
-            text="現在地を送ってください",
-            quick_reply=QuickReply(
-                items=[
-                QuickReplyButton(action=LocationAction(label="位置情報を送信"))
-                ]
+            reply = TextSendMessage(text="画像を送信してください！")
+            line_bot_api.reply_message(event.reply_token, reply)
+            return
+
+        elif user_message == "テキストから生成":
+            putItemToDynamoDB(
+                id=user_id,
+                state="ASK_CATEGORY",
+                chat=item["chat"],
+                val=item["val"]
             )
+
+            message = TextSendMessage(
+                text="カテゴリを選んでください",
+                quick_reply=QuickReply(
+                    items=[
+                        QuickReplyButton(action=MessageAction(label=label, text=label))
+                        for label in ["ファッション", "スポーツ", "音楽", "映画"]
+                    ]
+                )
+            )
+            line_bot_api.reply_message(event.reply_token, message)
+            return
+
+        else:
+            # その他のメッセージ → 位置情報を要求
+            putItemToDynamoDB(
+                id=user_id,
+                state="WAIT_LOCATION",
+                chat=item["chat"],
+                val=item["val"]
+            )
+
+            message = TextSendMessage(
+                text="現在地を送ってください",
+                quick_reply=QuickReply(
+                    items=[
+                        QuickReplyButton(action=LocationAction(label="位置情報を送信"))
+                    ]
+                )
+            )
+            line_bot_api.reply_message(event.reply_token, message)
+            return
+
+    # ★ ASK_CATEGORY → ユーザーがカテゴリを選択した後の処理
+    elif state == "ASK_CATEGORY":
+        reply = TextSendMessage(text=f"カテゴリ「{user_message}」を選択しました！テキストを入力してください。")
+        putItemToDynamoDB(
+            id=user_id,
+            state="WAIT_TEXT_INPUT",
+            chat=item["chat"],
+            val=item["val"]
         )
-        line_bot_api.reply_message(event.reply_token, message)
+        line_bot_api.reply_message(event.reply_token, reply)
+        return
+
+    # ★ WAIT_LOCATION → 位置情報以外が来たら再度催促
+    elif state == "WAIT_LOCATION":
+        reply = TextSendMessage(text="位置情報を送信してください。")
+        line_bot_api.reply_message(event.reply_token, reply)
+        return
+
+    # ★ WAIT_TEXT_INPUT → テキストを受けて生成すればOK
+    elif state == "WAIT_TEXT_INPUT":
+        reply = TextSendMessage(text=f"「{user_message}」で生成を開始します！")
+        putItemToDynamoDB(
+            id=user_id,
+            state="INIT",      # 初期状態に戻す
+            chat=item["chat"],
+            val=item["val"]
+        )
+        line_bot_api.reply_message(event.reply_token, reply)
+        return
     
 # -------------------------------
 # 位置メッセージ受信時の処理
@@ -125,7 +206,7 @@ def handle_image_message(event: MessageEvent):
     # 初回ユーザーの場合の処理
     if item is None:
         chat = gemini_model.start_chat(history=[])
-        putItemToDynamoDB(userID, 0, pickle.dumps(chat.history))
+        putItemToDynamoDB(userID, 0, pickle.dumps(chat.history), state="初期状態")
         item = getItemFromDynamoDB(userID)
 
     # 画像送信回数を更新
