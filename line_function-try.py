@@ -77,19 +77,15 @@ def handle_message(event):
         reply = TextSendMessage(text="画像を送信してください！")
         line_bot_api.reply_message(event.reply_token, reply)
     elif user_message == "テキストから生成":
-        # クイックリプライボタンの作成
-        quick_reply_buttons = QuickReply(
-            items=[
-                QuickReplyButton(action=MessageAction(label="ファッション", text="ファッション")),
-                QuickReplyButton(action=MessageAction(label="スポーツ", text="スポーツ")),
-                QuickReplyButton(action=MessageAction(label="音楽", text="音楽")),
-                QuickReplyButton(action=MessageAction(label="映画", text="映画")),
-        ]
-        )
         # TextSendMessageにクイックリプライを付与
         message = TextSendMessage(
-            text="カテゴリを選択してください",
-            quick_reply=quick_reply_buttons
+            text="カテゴリを選んでください",
+            quick_reply=QuickReply(
+                items=[
+                    QuickReplyButton(action=MessageAction(label=label, text=label))
+                    for label in ["ファッション", "スポーツ", "音楽", "映画"]
+                ]
+            )
         )
         # 送信
         line_bot_api.reply_message(event.reply_token, message)
@@ -109,12 +105,12 @@ def handle_message(event):
 # -------------------------------
 @handler.add(MessageEvent, message=LocationMessage)
 def handle_location(event):
-    latitude = event.message.latitude
-    longitude = event.message.longitude
-    address = event.message.address
+    latitude = event.message.latitude # 緯度
+    longitude = event.message.longitude # 経度
+    address = event.message.address # 住所
     line_bot_api.reply_message(
         event.reply_token,
-        TextSendMessage(text=f"位置情報を受け取りました！\n住所: {address}")
+        TextSendMessage(text=f"位置情報を受け取りました！\n住所: {address,}")
     )
 
 
