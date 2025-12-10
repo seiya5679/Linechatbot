@@ -213,13 +213,9 @@ def handle_message(event):
 def handle_location(event):
     user_id = event.source.user_id
 
-    latitude = event.message.latitude
-    longitude = event.message.longitude
     address = event.message.address
 
     # 保存（数値・文字列どちらでもOK）
-    save_session(user_id, "latitude", latitude)
-    save_session(user_id, "longitude", longitude)
     save_session(user_id, "address", address)
 
     # 会話で保存された内容を取得
@@ -239,7 +235,6 @@ def handle_location(event):
         TextSendMessage(text=result_text)
     )
 
-    
 # -------------------------------
 # 画像メッセージ受信時の処理
 # -------------------------------
