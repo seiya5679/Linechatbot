@@ -218,24 +218,44 @@ def handle_location(event):
 
     address = event.message.address
 
-    # 保存（数値・文字列どちらでもOK）
+    # 保存
     save_session(user_id, "address", address)
 
-    # 会話で保存された内容を取得
+    # 会話内容を取得
     session = get_session(user_id)
 
-    result_text = (
+    # ---- Gemini に渡すためのプロンプトを作成 ----
+    prompt = f"""
+あなたはプロのスタイリストです。
+以下のユーザー情報から、最適なコーディネートを提案してください。
+
+【ユーザー情報】
+- カテゴリー: {session.get('category', '未選択')}
+- 年齢: {session.get('age', '未選択')}
+- 色: {session.get('color', '未選択')}
+- 予算: {session.get('budget', '未選択')}
+- 行く場所: {session.get('address', '未選択')}
+
+【要件】
+- ユーザーの情報に合ったコーデを3つ提案する
+- それぞれのコーデについて、トップス・ボトムス・靴・小物を具体的に書く
+- 予算に収まるように価格感の目安も入れる
+- 文章は自然で読みやすく
+"""
+
+    # ---- Gemini 実行 ----
+    gemini_res = gemini_model.generate_content(prompt)
+    ai_text = gemini_res.text
+
+    # ---- LINE に返信 ----
+    reply_text = (
         "今までの会話から最適なコーデを生成しました！\n\n"
-        f"■ カテゴリー: {session.get('category', '未選択')}\n"
-        f"■ 年齢: {session.get('age', '未選択')}\n"
-        f"■ 色: {session.get('color', '未選択')}\n"
-        f"■ 予算: {session.get('budget', '未選択')}\n"
-        f"■ 場所: {session.get('address', '未送信')}\n"
+        f"{ai_text}"
     )
 
     line_bot_api.reply_message(
         event.reply_token,
-        TextSendMessage(text=result_text)
+        TextSendMessage(text=reply_text)
     )
 
 # -------------------------------
