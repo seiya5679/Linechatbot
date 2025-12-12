@@ -88,24 +88,50 @@ def handle_message(event):
     # -------------------------
     elif user_message == "テキストから生成":
         message = TextSendMessage(
-            text="どんなカテゴリーでコーデを組みますか？",
+            text="どちらの性別のコーデを希望しますか？",
             quick_reply=QuickReply(
                 items=[
                     QuickReplyButton(action=MessageAction(label=label, text=label))
-                    for label in ["カジュアル系", "綺麗系", "フォーマル", "スポーツ", "ストリート"]
+                    for label in ["男性", "女性"]
                 ]
             )
         )
         line_bot_api.reply_message(event.reply_token, message)
         return
 
+    elif user_message in ["男性"]:
+        save_session(user_id, "gender", user_message)
+        message = TextSendMessage(
+            text="どんなカテゴリーでコーデを組みますか？",
+            quick_reply=QuickReply(
+                items=[
+                    QuickReplyButton(action=MessageAction(label=label, text=label))
+                    for label in ["カジュアル系", "アメカジ","綺麗系", "フォーマル", "スポーツ","ビンテージ", "デザイナーズ","ストリート","地雷系"]
+                ]
+            )
+        )
+        line_bot_api.reply_message(event.reply_token, message)
+        return
+
+    elif user_message in ["女性"]:
+        save_session(user_id, "gender", user_message)
+        message = TextSendMessage(
+            text="どんなカテゴリーでコーデを組みますか？",
+            quick_reply=QuickReply(
+                items=[
+                    QuickReplyButton(action=MessageAction(label=label, text=label))
+                    for label in ["カジュアル系","綺麗系", "フォーマル", "スポーツ","エレガンス","ガーリー","デザイナーズ","ストリート","地雷系"]
+                ]
+            )
+        )
+        line_bot_api.reply_message(event.reply_token, message)
+        return
     # -------------------------
     # カテゴリー選択
     # -------------------------
-    elif user_message in ["カジュアル系", "綺麗系", "フォーマル", "スポーツ", "ストリート"]:
+    elif user_message in ["カジュアル系", "綺麗系", "フォーマル", "スポーツ", "ストリート","エレガンス","ガーリー","アメカジ","ビンテージ","デザイナーズ","地雷系"]:
         # 保存
         save_session(user_id, "category", user_message)
-
         message = TextSendMessage(
             text="年齢を選んでください",
             quick_reply=QuickReply(
@@ -136,22 +162,38 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, message)
         return
 
-    # -------------------------
-    # 色選択
-    # -------------------------
     elif user_message in ["明るめな色", "暗めな色", "派手目の色", "落ち着いた色", "モノトーン"]:
         save_session(user_id, "color", user_message)
 
         message = TextSendMessage(
-            text="予算を選んでください",
+            text="季節を選んでください",
+            quick_reply=QuickReply(
+                items=[
+                    QuickReplyButton(action=MessageAction(label=label, text=label))
+                    for label in ["春", "夏", "秋", "冬"]
+                ]
+            )
+        )
+        line_bot_api.reply_message(event.reply_token, message)
+        return
+
+
+    # -------------------------
+    # 色選択
+    # -------------------------
+    elif user_message in ["春", "夏", "秋", "冬"]:
+        save_session(user_id, "season", user_message)
+
+        message = TextSendMessage(
+            text="コーデの一式の予算を選んでください",
             quick_reply=QuickReply(
                 items=[
                     QuickReplyButton(action=MessageAction(label=label, text=label))
                     for label in [
-                        "1000円以下",
-                        "1000円〜5000円",
-                        "5000円〜10000円",
-                        "10000円以上",
+                        "10000円以内",
+                        "10000円〜20000円",
+                        "20000円〜30000円",
+                        "30000円以上",
                         "特に気にしない"
                     ]
                 ]
@@ -163,7 +205,7 @@ def handle_message(event):
     # -------------------------
     # 予算選択
     # -------------------------
-    elif user_message in ["1000円以下", "1000円〜5000円", "5000円〜10000円", "10000円以上", "特に気にしない"]:
+    elif user_message in ["10000円以内", "10000円〜20000円", "20000円〜30000円", "30000円以上", "特に気にしない"]:
         save_session(user_id, "budget", user_message)
 
         message = TextSendMessage(
@@ -189,9 +231,11 @@ def handle_message(event):
 
         result_text = (
             "保存済みの入力内容:\n"
+            f"・性別: {session.get('gender', '未選択')}\n"
             f"・カテゴリー: {session.get('category', '未選択')}\n"
             f"・年齢: {session.get('age', '未選択')}\n"
             f"・色: {session.get('color', '未選択')}\n"
+            f"・季節: {session.get('season', '未選択')}\n"
             f"・予算: {session.get('budget', '未選択')}\n"
             f"・住所: {session.get('address', '未送信')}\n"
         )
@@ -226,18 +270,19 @@ def handle_location(event):
 
     # ---- Gemini に渡すためのプロンプトを作成 ----
     prompt = f"""
-あなたはプロのスタイリストです。
 以下のユーザー情報から、最適なコーディネートを提案してください。
 
 【ユーザー情報】
+- 性別: {session.get('gender', '未選択')}
 - カテゴリー: {session.get('category', '未選択')}
 - 年齢: {session.get('age', '未選択')}
 - 色: {session.get('color', '未選択')}
+- 季節: {session.get('season', '未選択')}
 - 予算: {session.get('budget', '未選択')}
 - 行く場所: {session.get('address', '未選択')}
 
 【要件】
-- ユーザーの情報に合ったコーデを3つ提案する
+- ユーザーの情報に合ったコーデを1つ提案する
 - それぞれのコーデについて、トップス・ボトムス・靴・小物を具体的に書く
 - 予算に収まるように価格感の目安も入れる
 - 文章は自然で読みやすく
@@ -264,6 +309,9 @@ def handle_location(event):
 @handler.add(MessageEvent, message=ImageMessage)
 def handle_image(event: MessageEvent):
     user_id = event.source.user_id
+
+    # 会話内容を取得
+    session = get_session(user_id)
 
     # ---- LINE から画像データ取得 ----
     message_id = event.message.id
@@ -292,11 +340,18 @@ def handle_image(event: MessageEvent):
 
     # ---- Gemini Vision でコーデ提案 ----
     prompt = f"""
-あなたはプロのスタイリストです。
+以下のユーザー情報から、最適なコーディネートを提案してください。
 
-これは服のラベルです: {labels}
+【ユーザー情報】
+- 服の画像: {labels}
+- 性別: {session.get('gender', '未選択')}
+- 年齢: {session.get('age', '未選択')}
 
-この服を使ったおしゃれなコーデを3つ提案して
+【要件】
+- 服の解析結果と、ユーザーの情報があれば服の画像、ユーザー情報に合ったコーデを1つ提案する
+- それぞれのコーデについて、トップス・ボトムス・靴・小物を具体的に書く
+- 価格感の目安も入れる
+- 文章は自然で読みやすく
 """
 
     # Gemini Vision 解析
