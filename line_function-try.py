@@ -4,7 +4,7 @@ import boto3
 import google.generativeai as genai
 import pickle
 from botocore.exceptions import ClientError
-
+import requests
 from linebot import LineBotApi, WebhookHandler
 from linebot.models import (
     MessageEvent, TextMessage, TextSendMessage, ImageMessage,
@@ -22,6 +22,9 @@ handler = WebhookHandler(os.environ.get('CHANNEL_SECRET'))
 
 genai.configure(api_key=os.environ.get('GOOGLE_API_KEY'))
 gemini_model = genai.GenerativeModel("gemini-2.5-flash")
+
+s3 = boto3.client('s3')
+S3_BUCKET = os.environ['S3_BUCKET']
 
 rekognition = boto3.client('rekognition')
 dynamodb = boto3.resource('dynamodb')
@@ -239,55 +242,54 @@ def handle_location(event):
 # 画像メッセージ受信時の処理
 # -------------------------------
 @handler.add(MessageEvent, message=ImageMessage)
-def handle_image_message(event: MessageEvent):
-    userID = event.source.user_id
-    item = getItemFromDynamoDB(userID)
+def handle_image(event: MessageEvent):
+    user_id = event.source.user_id
 
-    # 初回ユーザーの場合の処理
-    if item is None:
-        chat = gemini_model.start_chat(history=[])
-        putItemToDynamoDB(userID, 0, pickle.dumps(chat.history))
-        item = getItemFromDynamoDB(userID)
-
-    # 画像送信回数を更新
-    putItemToDynamoDB(userID, item['val']+1, item['chat'])
-    retrun_message = str(item['val']+1) + "回目の画像投稿です。\n"
-
-    # 画像データ取得
+    # ---- LINE から画像データ取得 ----
     message_id = event.message.id
     message_content = line_bot_api.get_message_content(message_id)
-    message_binary = message_content.content  # バイナリデータとして取得
+    image_bytes = message_content.content
 
-    # Rekognitionでラベル検出
-    detect = rekognition.detect_labels(
-        Image={
-            "Bytes": message_binary
-        }
+    # ---- S3 にアップロード ----
+    s3_key = f"users/{user_id}/{message_id}.jpg"
+    s3.put_object(
+        Bucket=S3_BUCKET,
+        Key=s3_key,
+        Body=image_bytes,
+        ContentType="image/jpeg"
     )
-    labels = detect['Labels']
-    names = [label.get('Name') for label in labels]
 
-    # 人物が含まれるか確認
-    if "Human" in names or "Person" in names:
-        response = rekognition.recognize_celebrities(
-            Image={
-                "Bytes": message_binary
-            }
-        )
-        if len(response['CelebrityFaces']) > 0:
-            # 有名人を検出できた場合
-            for celeb in response['CelebrityFaces']:
-                retrun_message += celeb['Name'] + '\n'
-            retrun_message = retrun_message.rstrip('\n')
-        else:
-            retrun_message += "有名人を特定できませんでした！"
-    else:
-        retrun_message += "人物を検出できませんでした！"
+    # ---- Rekognition でラベル検出 ----
+    rekog_res = rekognition.detect_labels(
+        Image={"Bytes": image_bytes},
+        MaxLabels=10,
+        MinConfidence=70
+    )
+    labels = [label["Name"] for label in rekog_res["Labels"]]
 
-    # LINEに返信
+    # ---- Rekognition で人物検出 ----
+    has_person = "Person" in labels or "Human" in labels
+
+    # ---- Gemini Vision でコーデ提案 ----
+    prompt = f"""
+あなたはプロのスタイリストです。
+
+これは服のラベルです: {labels}
+
+この服を使ったおしゃれなコーデを3つ提案して
+"""
+
+    # Gemini Vision 解析
+    gemini_res = gemini_model.generate_content(
+        [prompt, {"mime_type": "image/jpeg", "data": image_bytes}]
+    )
+
+    reply_text = gemini_res.text
+
+    # ---- LINE に返信 ----
     line_bot_api.reply_message(
         event.reply_token,
-        TextSendMessage(text=retrun_message)
+        TextSendMessage(text=reply_text)
     )
 
 # -------------------------------
