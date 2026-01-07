@@ -374,63 +374,136 @@ def handle_location(event):
 @handler.add(MessageEvent, message=ImageMessage)
 def handle_image(event: MessageEvent):
     user_id = event.source.user_id
-
-    # 会話内容を取得
     session = get_session(user_id)
 
-    # ---- LINE から画像データ取得 ----
+    # -------------------------
+    # LINEから画像取得
+    # -------------------------
     message_id = event.message.id
     message_content = line_bot_api.get_message_content(message_id)
     image_bytes = message_content.content
 
-    # ---- S3 にアップロード ----
-    s3_key = f"users/{user_id}/{message_id}.jpg"
-    s3.put_object(
-        Bucket=S3_BUCKET,
-        Key=s3_key,
-        Body=image_bytes,
-        ContentType="image/jpeg"
-    )
-
-    # ---- Rekognition でラベル検出 ----
+    # -------------------------
+    # Rekognitionでラベル検出
+    # -------------------------
     rekog_res = rekognition.detect_labels(
         Image={"Bytes": image_bytes},
-        MaxLabels=10,
+        MaxLabels=5,
         MinConfidence=70
     )
     labels = [label["Name"] for label in rekog_res["Labels"]]
 
-    # ---- Rekognition で人物検出 ----
-    has_person = "Person" in labels or "Human" in labels
-
-    # ---- Gemini Vision でコーデ提案 ----
+    # -------------------------
+    # Gemini Vision（解析のみ）
+    # -------------------------
     prompt = f"""
-以下のユーザー情報から、最適なコーディネートを提案してください。
+以下の画像解析結果とユーザー情報から、
+真似しやすいコーデを1つ提案してください。
 
-【ユーザー情報】
-- 服の画像: {labels}
-- 性別: {session.get('gender', '未選択')}
-- 年齢: {session.get('age', '未選択')}
+【画像ラベル】
+{labels}
 
 【要件】
-- 服の解析結果と、ユーザーの情報があれば服の画像、ユーザー情報に合ったコーデを1つ提案する
-- それぞれのコーデについて、トップス・ボトムス・靴・小物を具体的に書く
-- 価格感の目安も入れる
-- 文章は自然で読みやすく
+- トップス・ボトムス・靴・小物を具体的に
+- 実用的でシンプル
+- 読みやすい文章
 """
 
-    # Gemini Vision 解析
     gemini_res = gemini_model.generate_content(
         [prompt, {"mime_type": "image/jpeg", "data": image_bytes}]
     )
+    ai_text = gemini_res.text
 
-    reply_text = gemini_res.text
+    # -------------------------
+    # Amazon検索キーワード
+    # -------------------------
+    gender = "メンズ" if session.get("gender") != "女性" else "レディース"
 
-    # ---- LINE に返信 ----
+    keywords = {
+        "tops": f"{labels[0] if labels else 'シャツ'} {gender}",
+        "bottoms": f"パンツ {gender}",
+        "shoes": f"スニーカー {gender}"
+    }
+
+    # -------------------------
+    # Flex Message（画像なし）
+    # -------------------------
+    flex_content = {
+        "type": "bubble",
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "paddingAll": "12px",
+            "spacing": "sm",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": "📸 画像からのコーデ提案",
+                    "weight": "bold",
+                    "size": "lg"
+                },
+                {
+                    "type": "text",
+                    "text": ai_text,
+                    "wrap": True,
+                    "size": "sm"
+                },
+                {
+                    "type": "separator"
+                },
+                {
+                    "type": "button",
+                    "style": "primary",
+                    "action": {
+                        "type": "uri",
+                        "label": "🛒 トップスをAmazonで見る",
+                        "uri": amazon_search(keywords["tops"])
+                    }
+                },
+                {
+                    "type": "button",
+                    "style": "primary",
+                    "action": {
+                        "type": "uri",
+                        "label": "🛒 ボトムスをAmazonで見る",
+                        "uri": amazon_search(keywords["bottoms"])
+                    }
+                },
+                {
+                    "type": "button",
+                    "style": "primary",
+                    "action": {
+                        "type": "uri",
+                        "label": "🛒 靴をAmazonで見る",
+                        "uri": amazon_search(keywords["shoes"])
+                    }
+                }
+            ]
+        }
+    }
+
+    # -------------------------
+    # LINE返信
+    # -------------------------
     line_bot_api.reply_message(
         event.reply_token,
-        TextSendMessage(text=reply_text)
+        FlexSendMessage(
+            alt_text="画像からおすすめコーデ（Amazon）",
+            contents=flex_content
+        )
     )
+
+    # -------------------------
+    # LINE返信
+    # -------------------------
+    line_bot_api.reply_message(
+        event.reply_token,
+        FlexSendMessage(
+            alt_text="画像からおすすめコーデ（Amazon）",
+            contents=flex_content
+        )
+    )
+
 
 # -------------------------------
 # Lambda関数のエントリポイント
