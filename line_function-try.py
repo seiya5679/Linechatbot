@@ -14,6 +14,30 @@ from linebot.models import (
     LocationMessage, LocationAction
 )
 
+import urllib.parse
+
+# ======================
+# Amazon検索リンク生成
+# ======================
+def amazon_search(keyword: str) -> str:
+    q = urllib.parse.quote(keyword)
+    return f"https://www.amazon.co.jp/s?k={q}"
+
+# ======================
+# 検索キーワード生成
+# ======================
+def build_keywords(session: dict):
+    gender = "メンズ" if session.get("gender") != "女性" else "レディース"
+    color = session.get("color", "白").replace("な色", "")
+    category = session.get("category", "カジュアル").replace("系", "")
+
+    return {
+        "tops": f"{color} オーバーサイズ シャツ {gender}",
+        "bottoms": f"{color} スラックス テーパード {gender}",
+        "shoes": f"黒 レザー ローファー {gender}"
+    }
+
+
 # -------------------------------
 # 設定
 # -------------------------------
@@ -259,43 +283,41 @@ def handle_message(event):
 @handler.add(MessageEvent, message=LocationMessage)
 def handle_location(event):
     user_id = event.source.user_id
-
     address = event.message.address
 
-    # 保存
     save_session(user_id, "address", address)
-
-    # 会話内容を取得
     session = get_session(user_id)
 
-    # ---- Gemini に渡すためのプロンプトを作成 ----
+    # Gemini用プロンプト
     prompt = f"""
-以下のユーザー情報から、最適なコーディネートを提案してください。
+以下の条件から、実用的で真似しやすいコーデを1つ提案してください。
 
-【ユーザー情報】
-- 性別: {session.get('gender', '未選択')}
-- カテゴリー: {session.get('category', '未選択')}
-- 年齢: {session.get('age', '未選択')}
-- 色: {session.get('color', '未選択')}
-- 季節: {session.get('season', '未選択')}
-- 予算: {session.get('budget', '未選択')}
-- 行く場所: {session.get('address', '未選択')}
+【条件】
+- 性別: {session.get('gender', 'メンズ')}
+- 年齢: {session.get('age', '20代')}
+- 系統: {session.get('category', 'カジュアル')}
+- 色: {session.get('color', '白')}
+- 季節: {session.get('season', '春')}
+- 予算: {session.get('budget', '普通')}
+- 行く場所: {address}
 
 【要件】
-- ユーザーの情報に合ったコーデを1つ提案する
-- それぞれのコーデについて、トップス・ボトムス・靴・小物を具体的に書く
-- 予算に収まるように価格感の目安も入れる
-- 文章は自然で読みやすく
+- トップス・ボトムス・靴を含める
+- 自然で読みやすい文章
 """
 
-    # ---- Gemini 実行 ----
     gemini_res = gemini_model.generate_content(prompt)
     ai_text = gemini_res.text
 
-    # ---- LINE に返信 ----
+    keywords = build_keywords(session)
+
     reply_text = (
-        "今までの会話から最適なコーデを生成しました！\n\n"
-        f"{ai_text}"
+        "👕 あなたにおすすめのコーデはこちら！\n\n"
+        f"{ai_text}\n\n"
+        "🛒 Amazonで商品を探す\n"
+        f"・トップス：{amazon_search(keywords['tops'])}\n"
+        f"・ボトムス：{amazon_search(keywords['bottoms'])}\n"
+        f"・靴：{amazon_search(keywords['shoes'])}"
     )
 
     line_bot_api.reply_message(
