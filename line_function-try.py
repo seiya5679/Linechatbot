@@ -14,6 +14,8 @@ from linebot.models import (
     LocationMessage, LocationAction
 )
 
+import re
+import json
 import urllib.parse
 
 # ======================
@@ -397,33 +399,46 @@ def handle_image(event: MessageEvent):
     # Gemini Vision（解析のみ）
     # -------------------------
     prompt = f"""
-以下の画像解析結果とユーザー情報から、
-真似しやすいコーデを1つ提案してください。
+以下の画像解析結果から、
+その服に似合うコーデを1つ提案してください。
 
 【画像ラベル】
 {labels}
 
 【要件】
-- トップス・ボトムス・靴・小物を具体的に
+- トップス・ボトムス・靴を具体的に
 - 実用的でシンプル
-- 読みやすい文章
+- 最後に「JSONのみ」を出力する
+- JSONの前後に説明文や ``` は付けない
+
+【出力ルール】
+・通常の文章
+・最後の行にJSONだけを書く
+
+【JSON例】
+{{
+  "tops": "白シャツ メンズ",
+  "bottoms": "黒 スラックス メンズ",
+  "shoes": "ローファー メンズ"
+}}
 """
 
     gemini_res = gemini_model.generate_content(
         [prompt, {"mime_type": "image/jpeg", "data": image_bytes}]
     )
-    ai_text = gemini_res.text
+
+    raw_text = gemini_res.text
 
     # -------------------------
-    # Amazon検索キーワード
+    # Gemini出力を分解
     # -------------------------
-    gender = "メンズ" if session.get("gender") != "女性" else "レディース"
+    json_match = re.search(r'\{[\s\S]*\}', raw_text)
+    keywords = json.loads(json_match.group()) if json_match else {}
 
-    keywords = {
-        "tops": f"{labels[0] if labels else 'シャツ'} {gender}",
-        "bottoms": f"パンツ {gender}",
-        "shoes": f"スニーカー {gender}"
-    }
+    display_text = (
+        raw_text.replace(json_match.group(), "").strip()
+        if json_match else raw_text
+    )
 
     # -------------------------
     # Flex Message（画像なし）
@@ -444,20 +459,20 @@ def handle_image(event: MessageEvent):
                 },
                 {
                     "type": "text",
-                    "text": ai_text,
+                    "text": display_text,
                     "wrap": True,
                     "size": "sm"
                 },
-                {
-                    "type": "separator"
-                },
+                {"type": "separator"},
                 {
                     "type": "button",
                     "style": "primary",
                     "action": {
                         "type": "uri",
-                        "label": "🛒 トップスをAmazonで見る",
-                        "uri": amazon_search(keywords["tops"])
+                        "label": "🛒 トップスを見る",
+                        "uri": amazon_search(
+                            keywords.get("tops", "メンズ トップス")
+                        )
                     }
                 },
                 {
@@ -465,8 +480,10 @@ def handle_image(event: MessageEvent):
                     "style": "primary",
                     "action": {
                         "type": "uri",
-                        "label": "🛒 ボトムスをAmazonで見る",
-                        "uri": amazon_search(keywords["bottoms"])
+                        "label": "🛒 ボトムスを見る",
+                        "uri": amazon_search(
+                            keywords.get("bottoms", "メンズ パンツ")
+                        )
                     }
                 },
                 {
@@ -474,8 +491,10 @@ def handle_image(event: MessageEvent):
                     "style": "primary",
                     "action": {
                         "type": "uri",
-                        "label": "🛒 靴をAmazonで見る",
-                        "uri": amazon_search(keywords["shoes"])
+                        "label": "🛒 靴を見る",
+                        "uri": amazon_search(
+                            keywords.get("shoes", "メンズ シューズ")
+                        )
                     }
                 }
             ]
@@ -483,18 +502,7 @@ def handle_image(event: MessageEvent):
     }
 
     # -------------------------
-    # LINE返信
-    # -------------------------
-    line_bot_api.reply_message(
-        event.reply_token,
-        FlexSendMessage(
-            alt_text="画像からおすすめコーデ（Amazon）",
-            contents=flex_content
-        )
-    )
-
-    # -------------------------
-    # LINE返信
+    # LINE返信（※1回だけ）
     # -------------------------
     line_bot_api.reply_message(
         event.reply_token,
