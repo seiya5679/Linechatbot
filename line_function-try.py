@@ -288,7 +288,7 @@ def handle_location(event):
     save_session(user_id, "address", address)
     session = get_session(user_id)
 
-    # Gemini用プロンプト
+    # Gemini
     prompt = f"""
 以下の条件から、実用的で真似しやすいコーデを1つ提案してください。
 
@@ -300,31 +300,74 @@ def handle_location(event):
 - 季節: {session.get('season', '春')}
 - 予算: {session.get('budget', '普通')}
 - 行く場所: {address}
-
-【要件】
-- トップス・ボトムス・靴を含める
-- 自然で読みやすい文章
 """
 
-    gemini_res = gemini_model.generate_content(prompt)
-    ai_text = gemini_res.text
-
+    ai_text = gemini_model.generate_content(prompt).text
     keywords = build_keywords(session)
 
-    reply_text = (
-        "👕 あなたにおすすめのコーデはこちら！\n\n"
-        f"{ai_text}\n\n"
-        "🛒 Amazonで商品を探す\n"
-        f"・トップス：{amazon_search(keywords['tops'])}\n"
-        f"・ボトムス：{amazon_search(keywords['bottoms'])}\n"
-        f"・靴：{amazon_search(keywords['shoes'])}"
-    )
+    # ======================
+    # Flex Message
+    # ======================
+    flex_content = {
+        "type": "bubble",
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "spacing": "md",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": "👕 おすすめコーデ",
+                    "weight": "bold",
+                    "size": "lg"
+                },
+                {
+                    "type": "text",
+                    "text": ai_text,
+                    "wrap": True,
+                    "size": "sm"
+                },
+                {
+                    "type": "separator"
+                },
+                {
+                    "type": "button",
+                    "style": "primary",
+                    "action": {
+                        "type": "uri",
+                        "label": "🛒 トップスをAmazonで見る",
+                        "uri": amazon_search(keywords["tops"])
+                    }
+                },
+                {
+                    "type": "button",
+                    "style": "primary",
+                    "action": {
+                        "type": "uri",
+                        "label": "🛒 ボトムスをAmazonで見る",
+                        "uri": amazon_search(keywords["bottoms"])
+                    }
+                },
+                {
+                    "type": "button",
+                    "style": "primary",
+                    "action": {
+                        "type": "uri",
+                        "label": "🛒 靴をAmazonで見る",
+                        "uri": amazon_search(keywords["shoes"])
+                    }
+                }
+            ]
+        }
+    }
 
     line_bot_api.reply_message(
         event.reply_token,
-        TextSendMessage(text=reply_text)
+        FlexSendMessage(
+            alt_text="おすすめコーデ（Amazonリンク）",
+            contents=flex_content
+        )
     )
-
 # -------------------------------
 # 画像メッセージ受信時の処理
 # -------------------------------
