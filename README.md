@@ -248,10 +248,6 @@ S3_BUCKET
 linechatbot/
 ├── lambda_function.py
 ├── README.md
-└── .gitignore
-```
-
-※ `lambda_function.py` は実際に使用するPythonファイル名に合わせて変更してください。
 
 ---
 
